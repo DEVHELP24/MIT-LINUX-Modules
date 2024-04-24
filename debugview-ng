@@ -1,0 +1,152 @@
+#!/bin/bash
+
+# Script: debugview-ng
+# Author: [NAZY-OS]
+# Description: [Shows various of system errors and warnings]
+
+
+# Usage function
+usage() {
+    echo "Usage: $0 [-h] [-m] [-e] [-s] [-x] [-o output_directory]" >&2
+    echo "  -h: Display this help message"
+    echo "  -m: List loaded kernel modules"
+    echo "  -e: Check for errors related to kernel modules"
+    echo "  -s: Find errors related to systemd services during startup"
+    echo "  -x: Find errors and warnings in Xorg logs"
+    echo "  -o output_directory: Specify the output directory to save results"
+    exit 1
+}
+
+# Function to get loaded kernel modules
+get_kernel_modules() {
+    lsmod | awk '{print $1}'
+}
+
+# Function to save results to output directory
+save_results() {
+    local output_dir=$1
+    local output_file=$2
+    local content=$3
+
+    echo -e "Saving results to ${output_dir}/${output_file}"
+
+    # Save results to the output directory
+    echo -e "$content" > "${output_dir}/${output_file}"
+    # Set permissions to allow all users to read, write, and delete the file
+    chmod 666 "${output_dir}/${output_file}"
+}
+
+# Generate output filename based on selected options
+generate_output_filename() {
+    local filename="ng_global_debug_results_$(date +'%Y%m%d%H%M')"
+
+    if [ "$list_modules" = true ]; then
+        filename="${filename}_modules"
+    fi
+
+    if [ "$check_errors" = true ]; then
+        filename="${filename}_errors"
+    fi
+
+    if [ "$check_systemd_errors" = true ]; then
+        filename="${filename}_systemd_errors"
+    fi
+
+    if [ "$check_xorg_debug" = true ]; then
+        filename="${filename}_xorg_debug"
+    fi
+
+    echo "${filename}.txt"
+}
+
+# Default values
+output_directory=""
+
+# Parse command-line options
+while getopts ":hmesxo:" opt; do
+    case ${opt} in
+        h)
+            usage
+            ;;
+        m)
+            list_modules=true
+            ;;
+        e)
+            check_errors=true
+            ;;
+        s)
+            check_systemd_errors=true
+            ;;
+        x)
+            check_xorg_debug=true
+            ;;
+        o)
+            output_directory=$OPTARG
+            ;;
+        :)
+            echo "Error: Option -$OPTARG requires an argument." >&2
+            usage
+            ;;
+        \?)
+            echo "Error: Invalid option -$OPTARG" >&2
+            usage
+            ;;
+    esac
+done
+shift $((OPTIND -1))
+
+# Main script logic
+main() {
+    local result=""
+
+    # Check if no options are selected
+    if [ -z "$list_modules" ] && [ -z "$check_errors" ] && [ -z "$check_systemd_errors" ] && [ -z "$check_xorg_debug" ]; then
+        echo "Error: No option selected. Please use at least one of the available options." >&2
+        usage
+    fi
+
+    # Add your script logic here
+    if [ "$list_modules" = true ]; then
+        result+="Loaded kernel modules:\n"
+        result+=$(get_kernel_modules)
+        result+="\n"
+    fi
+
+    if [ "$check_errors" = true ]; then
+        result+="Checking for errors related to kernel modules:\n"
+        result+=$(dmesg | grep -iE '^\[[0-9.]+\] \[[[:alpha:]]+\] (BUG|ERROR|FATAL|Oops|unable to handle|Kernel panic|Call Trace:|WARNING|warn)' | grep -v 'Loading\|Starting')
+        result+="\n"
+    fi
+
+    if [ "$check_systemd_errors" = true ]; then
+        result+="Finding errors related to systemd services during startup:\n"
+        # Get failed systemd services during startup
+        failed_services=$(systemctl list-units --state=failed --type=service --no-legend)
+        if [ -n "$failed_services" ]; then
+            result+="$failed_services\n"
+        else
+            result+="No failed systemd services found during startup.\n"
+        fi
+        result+="\n"
+    fi
+
+    if [ "$check_xorg_debug" = true ]; then
+        result+="Finding errors and warnings in Xorg logs:\n"
+        result+=$(grep -iE '^\[.*\] \(EE\)|^\[.*\] \(WW\)' /var/log/Xorg.0.log)
+        result+="\n"
+    fi
+
+    # Save results to the output directory if specified
+    if [ -n "$output_directory" ]; then
+        # Generate output filename
+        output_filename=$(generate_output_filename)
+        # Save results to the output directory
+        save_results "$output_directory" "$output_filename" "$result"
+    else
+        # Display results if not saved
+        echo -e "$result"
+    fi
+}
+
+# Call main function
+main
