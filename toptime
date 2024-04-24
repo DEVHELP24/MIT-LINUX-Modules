@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Script: toptime
+# Author: [NAZY-OS]
+# Description: [Shows various of system errors and warnings]
+
+
+ignore_list="waybar|Xwayland|gammastep|wf-panel|wf-background|wl-copy|libtracker|tracker-miner"
+tty_pid="$(ps ax | grep $$ | grep -v grep | awk '{ print $1 }')"
+
+watch -n 3 "uptime;echo '            STARTED     PID   %MEM   ELAPSED    NI %CPU   PGRP TT       RUSER    EUSER    FUSER    COMMAND';ps --forest --sort=-etime -eafo lstart,pid,%mem,etime,nice,%cpu,pgrp,tty,ruser,euser,fuser,command | sed -e "s/$(date +%Y)//" | grep -v -E '$tty_pid|$ignore_list|STARTED'"
