@@ -1,0 +1,3 @@
+#!/bin/bash
+
+sudo dmesg -w -H -k --color=auto -T
