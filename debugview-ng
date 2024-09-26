@@ -2,8 +2,7 @@
 
 # Script: debugview-ng
 # Author: [NAZY-OS]
-# Description: [Shows various of system errors and warnings]
-
+# Description: [Shows various system errors and warnings]
 
 # Usage function
 usage() {
@@ -19,7 +18,47 @@ usage() {
 
 # Function to get loaded kernel modules
 get_kernel_modules() {
+    # List all loaded kernel modules
     lsmod | awk '{print $1}'
+}
+
+# Enhanced function to check for kernel module errors and warnings
+check_module_errors() {
+    result="Checking for errors related to kernel modules:\n"
+
+    # Check dmesg for module-related errors or warnings
+    result+="Checking dmesg for module errors or warnings:\n"
+    result+=$(dmesg | grep -iE "(modprobe|insmod|rmmod|module.*(failed|not found|error|denied|unknown symbol|unresolved symbol|init failed))")
+    result+="\n"
+
+    # Check journalctl for module-related logs (for systemd systems)
+    if command -v journalctl &> /dev/null; then
+        result+="Checking journalctl for module errors or warnings:\n"
+        result+=$(journalctl -k | grep -iE "(modprobe|insmod|rmmod|module.*(failed|not found|error|denied|unknown symbol|unresolved symbol|init failed))")
+        result+="\n"
+    else
+        result+="journalctl is not available.\n"
+    fi
+
+    # Check /var/log/kern.log if available
+    if [[ -f /var/log/kern.log ]]; then
+        result+="Checking /var/log/kern.log for module errors or warnings:\n"
+        result+=$(grep -iE "(modprobe|insmod|rmmod|module.*(failed|not found|error|denied|unknown symbol|unresolved symbol|init failed))" /var/log/kern.log)
+        result+="\n"
+    else
+        result+="/var/log/kern.log is not available.\n"
+    fi
+
+    # Check /var/log/syslog if available
+    if [[ -f /var/log/syslog ]]; then
+        result+="Checking /var/log/syslog for module errors or warnings:\n"
+        result+=$(grep -iE "(modprobe|insmod|rmmod|module.*(failed|not found|error|denied|unknown symbol|unresolved symbol|init failed))" /var/log/syslog)
+        result+="\n"
+    else
+        result+="/var/log/syslog is not available.\n"
+    fi
+
+    echo "$result"
 }
 
 # Function to save results to output directory
@@ -40,6 +79,7 @@ save_results() {
 generate_output_filename() {
     local filename="ng_global_debug_results_$(date +'%Y%m%d%H%M')"
 
+    # Add suffixes to filename based on options used
     if [ "$list_modules" = true ]; then
         filename="${filename}_modules"
     fi
@@ -105,22 +145,22 @@ main() {
         usage
     fi
 
-    # Add your script logic here
+    # List loaded kernel modules (-m option)
     if [ "$list_modules" = true ]; then
         result+="Loaded kernel modules:\n"
         result+=$(get_kernel_modules)
         result+="\n"
     fi
 
+    # Check kernel module errors (-e option)
     if [ "$check_errors" = true ]; then
-        result+="Checking for errors related to kernel modules:\n"
-        result+=$(dmesg | grep -iE '^\[[0-9.]+\] \[[[:alpha:]]+\] (BUG|ERROR|FATAL|Oops|unable to handle|Kernel panic|Call Trace:|WARNING|warn)' | grep -v 'Loading\|Starting')
+        result+="$(check_module_errors)"
         result+="\n"
     fi
 
+    # Find errors related to systemd services during startup (-s option)
     if [ "$check_systemd_errors" = true ]; then
         result+="Finding errors related to systemd services during startup:\n"
-        # Get failed systemd services during startup
         failed_services=$(systemctl list-units --state=failed --type=service --no-legend)
         if [ -n "$failed_services" ]; then
             result+="$failed_services\n"
@@ -130,15 +170,16 @@ main() {
         result+="\n"
     fi
 
+    # Find errors and warnings in Xorg logs (-x option)
     if [ "$check_xorg_debug" = true ]; then
         result+="Finding errors and warnings in Xorg logs:\n"
         result+=$(grep -iE '^\[.*\] \(EE\)|^\[.*\] \(WW\)' /var/log/Xorg.0.log)
         result+="\n"
     fi
 
-    # Save results to the output directory if specified
+    # Save results to the output directory if specified (-o option)
     if [ -n "$output_directory" ]; then
-        # Generate output filename
+        # Generate output filename based on selected options
         output_filename=$(generate_output_filename)
         # Save results to the output directory
         save_results "$output_directory" "$output_filename" "$result"
