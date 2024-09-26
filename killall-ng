@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# SPDX-License-Identifier: MIT
+# Maintainer: [NAZY-OS]
+# This script kills all processes that match the given program names.
+
+# Usage: killall-ng <program-name1> <program-name2> ...
+
+if [ -z "$1" ]; then
+  echo "Please provide at least one program name."
+  exit 1
+fi
+
+
+# Loop until all specified processes are killed
+while true; do
+  all_killed=true  # Assume all processes are killed
+
+  for prog in "$@"; do
+    pids=$(pidof "$prog")
+
+    if [ -n "$pids" ]; then
+      kill $pids 2>/dev/null
+      
+      if [ $? -eq 0 ]; then
+        echo "Successfully killed process(es) for '$prog'."
+      else
+        echo "Failed to kill process(es) for '$prog'."
+      fi
+      all_killed=false  # Mark that not all processes are killed
+    else
+      echo "No process found for '$prog'."
+    fi
+  done
+
+  # Break the loop if all specified processes are killed
+  if $all_killed; then
+    break
+  fi
+
+  # Optional: Wait for a moment before checking again
+  sleep 1
+done
+
+echo "All specified processes have been killed."
