@@ -20,7 +20,7 @@ while true; do
     pids=$(pidof "$prog")
 
     if [ -n "$pids" ]; then
-      kill $pids 2>/dev/null
+      kill -9 $pids 2>/dev/null
       
       if [ $? -eq 0 ]; then
         echo "Successfully killed process(es) for '$prog'."
