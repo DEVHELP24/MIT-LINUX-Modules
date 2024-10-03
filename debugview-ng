@@ -1,185 +1,151 @@
-#include <iostream>
-#include <fstream>
-#include <string>
-#include <vector>
-#include <cstdlib>
-#include <ctime>
-#include <sys/stat.h>
-#include <unistd.h>
+#!/bin/bash
 
-using namespace std;
+# Script: debugview-ng
+# Author: [NAZY-OS]
+# Description: [Shows various system errors and warnings]
 
-// Function prototypes
-void usage();
-vector<string> getKernelModules();
-string checkModuleErrors();
-void saveResults(const string& outputDir, const string& outputFile, const string& content);
-string generateOutputFilename(bool listModules, bool checkErrors, bool checkSystemdErrors, bool checkXorgDebug);
-
-// Usage function
-void usage() {
-    cerr << "Usage: debugview-ng [-h] [-m] [-e] [-s] [-x] [-o output_directory]" << endl;
-    cerr << "  -h: Display this help message" << endl;
-    cerr << "  -m: List loaded kernel modules" << endl;
-    cerr << "  -e: Check for errors related to kernel modules" << endl;
-    cerr << "  -s: Find errors related to systemd services during startup" << endl;
-    cerr << "  -x: Find errors and warnings in Xorg logs" << endl;
-    cerr << "  -o output_directory: Specify the output directory to save results" << endl;
-    exit(1);
+# Usage function
+usage() {
+    echo "Usage: $0 [-h] [-m] [-e] [-s] [-x] [-o output_directory]" >&2
+    echo "  -h: Display this help message"
+    echo "  -m: List loaded kernel modules"
+    echo "  -e: Check for errors related to kernel modules"
+    echo "  -s: Find errors related to systemd services during startup"
+    echo "  -x: Find errors and warnings in Xorg logs"
+    echo "  -o output_directory: Specify the output directory to save results"
+    exit 1
 }
 
-// Function to get loaded kernel modules
-vector<string> getKernelModules() {
-    vector<string> modules;
-    FILE* pipe = popen("lsmod", "r");
-    if (!pipe) {
-        cerr << "Failed to run command: lsmod" << endl;
-        return modules;
-    }
-
-    char buffer[128];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        modules.push_back(string(buffer));
-    }
-    pclose(pipe);
-    return modules;
+# Function to get loaded kernel modules
+get_kernel_modules() {
+    lsmod | awk '{print $1}'
 }
 
-// Enhanced function to check for kernel module errors and warnings
-string checkModuleErrors() {
-    string result = "Checking for errors related to kernel modules:\n";
-    // Check dmesg for module-related errors or warnings
-    result += "Checking dmesg for module errors or warnings:\n";
-    
-    // Execute command and capture output
-    FILE* pipe = popen("dmesg | grep -iE '(modprobe|insmod|rmmod|module.*(failed|not found|error|denied|unknown symbol|unresolved symbol|init failed))'", "r");
-    if (!pipe) {
-        cerr << "Failed to run command: dmesg" << endl;
-        return result;
-    }
+# Enhanced function to check for kernel module errors and warnings
+check_module_errors() {
+    local result="Checking for errors related to kernel modules:\n"
 
-    char buffer[128];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        result += string(buffer);
-    }
-    pclose(pipe);
+    result+="Checking dmesg for module errors or warnings:\n"
+    result+=$(dmesg | grep -iE "(modprobe|insmod|rmmod|module.*(failed|not found|error|denied|unknown symbol|unresolved symbol|init failed))" || echo "No dmesg errors found.\n")
+    result+="\n"
 
-    // Similar checks for journalctl and logs can be added here...
+    if command -v journalctl &> /dev/null; then
+        result+="Checking journalctl for module errors or warnings:\n"
+        result+=$(journalctl -k | grep -iE "(modprobe|insmod|rmmod|module.*(failed|not found|error|denied|unknown symbol|unresolved symbol|init failed))" || echo "No journalctl errors found.\n")
+        result+="\n"
+    else
+        result+="journalctl is not available.\n"
+    fi
 
-    return result;
+    if [[ -f /var/log/kern.log ]]; then
+        result+="Checking /var/log/kern.log for module errors or warnings:\n"
+        result+=$(grep -iE "(modprobe|insmod|rmmod|module.*(failed|not found|error|denied|unknown symbol|unresolved symbol|init failed))" /var/log/kern.log || echo "No kern.log errors found.\n")
+        result+="\n"
+    else
+        result+="/var/log/kern.log is not available.\n"
+    fi
+
+    if [[ -f /var/log/syslog ]]; then
+        result+="Checking /var/log/syslog for module errors or warnings:\n"
+        result+=$(grep -iE "(modprobe|insmod|rmmod|module.*(failed|not found|error|denied|unknown symbol|unresolved symbol|init failed))" /var/log/syslog || echo "No syslog errors found.\n")
+        result+="\n"
+    else
+        result+="/var/log/syslog is not available.\n"
+    fi
+
+    echo -e "$result"
 }
 
-// Function to save results to output directory
-void saveResults(const string& outputDir, const string& outputFile, const string& content) {
-    string fullPath = outputDir + "/" + outputFile;
-    ofstream outFile(fullPath);
-    if (!outFile) {
-        cerr << "Failed to open file for writing: " << fullPath << endl;
-        return;
-    }
-    outFile << content;
-    outFile.close();
+# Function to save results to output directory
+save_results() {
+    local output_dir=$1
+    local output_file=$2
+    local content=$3
+
+    if [[ ! -d "$output_dir" ]]; then
+        echo "Error: Output directory $output_dir does not exist." >&2
+        return 1
+    fi
+
+    echo -e "Saving results to ${output_dir}/${output_file}"
+    echo -e "$content" > "${output_dir}/${output_file}"
+    chmod 666 "${output_dir}/${output_file}"
 }
 
-// Generate output filename based on selected options
-string generateOutputFilename(bool listModules, bool checkErrors, bool checkSystemdErrors, bool checkXorgDebug) {
-    string filename = "ng_global_debug_results_" + to_string(time(nullptr));
+# Generate output filename based on selected options
+generate_output_filename() {
+    local filename="ng_global_debug_results_$(date +'%Y%m%d%H%M')"
 
-    if (listModules) filename += "_modules";
-    if (checkErrors) filename += "_errors";
-    if (checkSystemdErrors) filename += "_systemd_errors";
-    if (checkXorgDebug) filename += "_xorg_debug";
+    [[ "$list_modules" == true ]] && filename+="_modules"
+    [[ "$check_errors" == true ]] && filename+="_errors"
+    [[ "$check_systemd_errors" == true ]] && filename+="_systemd_errors"
+    [[ "$check_xorg_debug" == true ]] && filename+="_xorg_debug"
 
-    return filename + ".txt";
+    echo "${filename}.txt"
 }
 
-// Main function
-int main(int argc, char* argv[]) {
-    bool listModules = false, checkErrors = false, checkSystemdErrors = false, checkXorgDebug = false;
-    string outputDirectory;
+# Default values
+output_directory=""
 
-    // Parse command-line options
-    int opt;
-    while ((opt = getopt(argc, argv, "hmesxo:")) != -1) {
-        switch (opt) {
-            case 'h':
-                usage();
-                break;
-            case 'm':
-                listModules = true;
-                break;
-            case 'e':
-                checkErrors = true;
-                break;
-            case 's':
-                checkSystemdErrors = true;
-                break;
-            case 'x':
-                checkXorgDebug = true;
-                break;
-            case 'o':
-                outputDirectory = optarg;
-                break;
-            default:
-                usage();
-        }
-    }
+# Parse command-line options
+while getopts ":hmesxo:" opt; do
+    case ${opt} in
+        h) usage ;;
+        m) list_modules=true ;;
+        e) check_errors=true ;;
+        s) check_systemd_errors=true ;;
+        x) check_xorg_debug=true ;;
+        o) output_directory=$OPTARG ;;
+        :) echo "Error: Option -$OPTARG requires an argument." >&2; usage ;;
+        \?) echo "Error: Invalid option -$OPTARG" >&2; usage ;;
+    esac
+done
+shift $((OPTIND -1))
 
-    // Main script logic
-    string result;
-    if (!listModules && !checkErrors && !checkSystemdErrors && !checkXorgDebug) {
-        cerr << "Error: No option selected. Please use at least one of the available options." << endl;
-        usage();
-    }
+# Main script logic
+result=""
 
-    // List loaded kernel modules (-m option)
-    if (listModules) {
-        result += "Loaded kernel modules:\n";
-        auto modules = getKernelModules();
-        for (const auto& mod : modules) {
-            result += mod;
-        }
-        result += "\n";
-    }
+if [[ -z "$list_modules" && -z "$check_errors" && -z "$check_systemd_errors" && -z "$check_xorg_debug" ]]; then
+    echo "Error: No option selected. Please use at least one of the available options." >&2
+    usage
+fi
 
-    // Check kernel module errors (-e option)
-    if (checkErrors) {
-        result += checkModuleErrors();
-        result += "\n";
-    }
+# List loaded kernel modules (-m option)
+if [[ "$list_modules" == true ]]; then
+    result+="Loaded kernel modules:\n"
+    result+=$(get_kernel_modules)
+    result+="\n"
+fi
 
-    // Find errors related to systemd services during startup (-s option)
-    if (checkSystemdErrors) {
-        result += "Finding errors related to systemd services during startup:\n";
-        FILE* pipe = popen("systemctl list-units --state=failed --type=service --no-legend", "r");
-        char buffer[128];
-        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-            result += string(buffer);
-        }
-        pclose(pipe);
-        result += (result.empty() ? "No failed systemd services found during startup.\n" : "\n");
-    }
+# Check kernel module errors (-e option)
+if [[ "$check_errors" == true ]]; then
+    result+="$(check_module_errors)"
+    result+="\n"
+fi
 
-    // Find errors and warnings in Xorg logs (-x option)
-    if (checkXorgDebug) {
-        result += "Finding errors and warnings in Xorg logs:\n";
-        FILE* pipe = popen("grep -iE '^\\[.*\\] \\(EE\\)|^\\[.*\\] \\(WW\\)' /var/log/Xorg.0.log", "r");
-        char buffer[128];
-        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-            result += string(buffer);
-        }
-        pclose(pipe);
-        result += "\n";
-    }
+# Find errors related to systemd services during startup (-s option)
+if [[ "$check_systemd_errors" == true ]]; then
+    result+="Finding errors related to systemd services during startup:\n"
+    failed_services=$(systemctl list-units --state=failed --type=service --no-legend)
+    if [[ -n "$failed_services" ]]; then
+        result+="$failed_services\n"
+    else
+        result+="No failed systemd services found during startup.\n"
+    fi
+    result+="\n"
+fi
 
-    // Save results to the output directory if specified (-o option)
-    if (!outputDirectory.empty()) {
-        string outputFilename = generateOutputFilename(listModules, checkErrors, checkSystemdErrors, checkXorgDebug);
-        saveResults(outputDirectory, outputFilename, result);
-    } else {
-        // Display results if not saved
-        cout << result;
-    }
+# Find errors and warnings in Xorg logs (-x option)
+if [[ "$check_xorg_debug" == true ]]; then
+    result+="Finding errors and warnings in Xorg logs:\n"
+    result+=$(grep -iE '^\[.*\] \(EE\)|^\[.*\] \(WW\)' /var/log/Xorg.0.log || echo "No Xorg errors found.\n")
+    result+="\n"
+fi
 
-    return 0;
-}
+# Save results to the output directory if specified (-o option)
+if [[ -n "$output_directory" ]]; then
+    output_filename=$(generate_output_filename)
+    save_results "$output_directory" "$output_filename" "$result"
+else
+    echo -e "$result"
+fi
