@@ -7,3 +7,5 @@
 sudo sed -i "s/auth.*sufficient.*pam_wheel.so trust use_uid/auth required pam_wheel.so trust use_uid/g" /etc/pam.d/su &> /dev/null
 sudo bash -c "echo '%wheel  ALL=(ALL) ALL' > /etc/sudoers.d/g_wheel" &> /dev/null
 sudo cat /etc/sudoers | grep pwfeedback &> /dev/null || sudo bash -c "printf '\nDefaults env_reset,pwfeedback,timestamp_timeout=10,passwd_timeout=0,insults' >> /etc/sudoers" &> /dev/null
+sudo echo "auth required pam_faillock.so preauth silent deny=5 unlock_time=3600" >> /etc/pam.d/sudo
+sudo echo "auth required pam_faillock.so authfail deny=5 unlock_time=3600" >> /etc/pam.d/sudo
