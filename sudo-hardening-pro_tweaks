@@ -2,17 +2,111 @@
 
 # Script: sudo-hardening-pro_tweaks
 # Author: [NAZY-OS]
-# Description: [Shows various of system errors and warnings]
+# Description: [Applies various hardening tweaks to system PAM and sudo configurations]
 
-sudo sed -i "s/auth.*sufficient.*pam_wheel.so trust use_uid/auth required pam_wheel.so trust use_uid/g" /etc/pam.d/su &> /dev/null
-sudo bash -c "echo '%wheel  ALL=(ALL) ALL' > /etc/sudoers.d/g_wheel" &> /dev/null
-sudo cat /etc/sudoers | grep pwfeedback &> /dev/null || sudo bash -c "printf '\nDefaults env_reset,pwfeedback,timestamp_timeout=10,passwd_timeout=0,insults' >> /etc/sudoers" &> /dev/null
+# Function to check and add a line to a file if it doesn't exist
+add_line_if_missing() {
+    local file="$1"
+    local line="$2"
+    if ! grep -q "$line" "$file"; then
+        echo "Adding line to $file: $line"
+        echo "$line" | sudo tee -a "$file" > /dev/null
+    else
+        echo "Line already present in $file: $line"
+    fi
+}
 
-sudo echo >> /etc/pam.d/sudo
-sudo echo "auth required pam_faillock.so preauth silent deny=5 unlock_time=3600" >> /etc/pam.d/sudo
-sudo echo "auth required pam_faillock.so authfail deny=5 unlock_time=3600" >> /etc/pam.d/sudo
+# Function to update or add pam_faillock to PAM configuration files
+add_faillock_to_pam() {
+    local file="$1"
+    
+    # Add pam_faillock lines if missing
+    add_line_if_missing "$file" "auth required pam_faillock.so preauth silent deny=5 unlock_time=3600"
+    add_line_if_missing "$file" "auth required pam_faillock.so authfail deny=5 unlock_time=3600"
+    add_line_if_missing "$file" "account required pam_faillock.so"
+}
 
-sudo echo >> /etc/pam.d/su
-sudo echo "auth required pam_faillock.so preauth silent deny=5 unlock_time=3600" >> /etc/pam.d/su
-sudo echo "auth [default=die] pam_faillock.so authfail deny=5 unlock_time=3600" >> /etc/pam.d/su
-sudo echo "account required pam_faillock.so" >> /etc/pam.d/su
+# Function to apply wheel and pam_wheel configuration in relevant files
+update_wheel_config() {
+    local file="$1"
+    
+    # Update pam_wheel config for PAM files
+    if ! grep -q "auth required pam_wheel.so trust use_uid" "$file"; then
+        echo "Adding pam_wheel.so configuration to $file"
+        echo "auth required pam_wheel.so trust use_uid" | sudo tee -a "$file" > /dev/null
+    else
+        echo "pam_wheel.so configuration already exists in $file"
+    fi
+}
+
+# Function to update sudoers for %wheel group and Defaults
+update_sudoers_config() {
+    # Ensure sudoers config for %wheel group exists
+    add_line_if_missing "/etc/sudoers" "%wheel  ALL=(ALL) ALL"
+    add_line_if_missing "/etc/sudoers" "Defaults env_reset,pwfeedback,timestamp_timeout=10,passwd_timeout=0,insults"
+}
+
+# Function to apply changes to sudoers.d
+update_sudoers_d_config() {
+    local file="/etc/sudoers.d/g_wheel"
+    
+    # Ensure sudoers.d config for %wheel exists
+    add_line_if_missing "$file" "%wheel  ALL=(ALL) ALL"
+    add_line_if_missing "$file" "Defaults env_reset,pwfeedback,timestamp_timeout=10,passwd_timeout=0,insults"
+}
+
+# Ensure pam_faillock is added to common-auth (global PAM config)
+add_faillock_to_pam "/etc/pam.d/common-auth"
+
+# Ensure pam_faillock is added to su-specific PAM config
+add_faillock_to_pam "/etc/pam.d/su"
+
+# Ensure pam_faillock is added to sudo-specific PAM config
+add_faillock_to_pam "/etc/pam.d/sudo"
+
+# Ensure pam_wheel is correctly configured in PAM files
+update_wheel_config "/etc/pam.d/su"
+update_wheel_config "/etc/pam.d/sudo"
+
+# Update sudoers file with necessary group and defaults configuration
+update_sudoers_config
+
+# Update sudoers.d file for the 'wheel' group
+update_sudoers_d_config
+
+# Additional check and patch for pam_wheel in sudoers
+if grep -q "auth required pam_wheel.so trust use_uid" /etc/sudoers; then
+    echo "Removing pam_wheel.so configuration from /etc/sudoers as it belongs in PAM config"
+    sudo sed -i "/auth required pam_wheel.so trust use_uid/d" /etc/sudoers
+else
+    echo "pam_wheel.so is correctly not present in /etc/sudoers"
+fi
+
+# After patching, let's verify the patches by running the check
+echo "Verifying changes after patching..."
+
+# Check if required configurations are present
+check_config() {
+    local file="$1"
+    local search="$2"
+    if grep -q "$search" "$file"; then
+        echo "PASS: Found '$search' in $file"
+    else
+        echo "FAIL: '$search' not found in $file"
+    fi
+}
+
+# Perform the check on all necessary files
+check_config "/etc/pam.d/common-auth" "auth required pam_faillock.so preauth silent deny=5 unlock_time=3600"
+check_config "/etc/pam.d/common-auth" "auth required pam_faillock.so authfail deny=5 unlock_time=3600"
+check_config "/etc/pam.d/common-auth" "account required pam_faillock.so"
+check_config "/etc/pam.d/su" "auth required pam_faillock.so preauth silent deny=5 unlock_time=3600"
+check_config "/etc/pam.d/su" "auth required pam_faillock.so authfail deny=5 unlock_time=3600"
+check_config "/etc/pam.d/su" "account required pam_faillock.so"
+check_config "/etc/pam.d/sudo" "auth required pam_faillock.so preauth silent deny=5 unlock_time=3600"
+check_config "/etc/pam.d/sudo" "auth required pam_faillock.so authfail deny=5 unlock_time=3600"
+check_config "/etc/pam.d/sudo" "account required pam_faillock.so"
+check_config "/etc/sudoers" "%wheel  ALL=(ALL) ALL"
+check_config "/etc/sudoers" "Defaults env_reset,pwfeedback,timestamp_timeout=10,passwd_timeout=0,insults"
+check_config "/etc/sudoers.d/g_wheel" "%wheel  ALL=(ALL) ALL"
+check_config "/etc/sudoers.d/g_wheel" "Defaults env_reset,pwfeedback,timestamp_timeout=10,passwd_timeout=0,insults"
