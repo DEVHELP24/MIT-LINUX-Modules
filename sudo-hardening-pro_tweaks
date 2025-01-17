@@ -21,8 +21,7 @@ add_faillock_to_pam() {
     local file="$1"
     
     # Add pam_faillock lines if missing
-    add_line_if_missing "$file" "auth required pam_faillock.so preauth silent deny=5 unlock_time=3600"
-    add_line_if_missing "$file" "auth required pam_faillock.so authfail deny=5 unlock_time=3600"
+    add_line_if_missing "$file" "auth required pam_faillock.so authfail preauth silent deny=5 unlock_time=3600"
     add_line_if_missing "$file" "account required pam_faillock.so"
 }
 
@@ -98,7 +97,6 @@ check_config() {
 
 # Perform the check on all necessary files
 check_config "/etc/pam.d/common-auth" "auth required pam_faillock.so preauth silent deny=5 unlock_time=3600"
-check_config "/etc/pam.d/common-auth" "auth required pam_faillock.so authfail deny=5 unlock_time=3600"
 check_config "/etc/pam.d/common-auth" "account required pam_faillock.so"
 check_config "/etc/pam.d/su" "auth required pam_faillock.so preauth silent deny=5 unlock_time=3600"
 check_config "/etc/pam.d/su" "auth required pam_faillock.so authfail deny=5 unlock_time=3600"
